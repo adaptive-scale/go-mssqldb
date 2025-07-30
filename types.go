@@ -123,13 +123,13 @@ type xmlInfo struct {
 	XmlSchemaCollection string
 }
 
-func ReadTypeInfo(r *tdsBuffer) typeInfo {
-	return readTypeInfo(r)
+func ReadTypeInfo(r *tdsBuffer, typeId byte, c *cryptoMetadata, encoding msdsn.EncodeParameters) typeInfo {
+	return readTypeInfo(r, typeId, c, encoding)
 }
 
-func readTypeInfo(r *tdsBuffer) (res typeInfo) {
-	res.TypeId = r.byte()
-	switch res.TypeId {
+func readTypeInfo(r *tdsBuffer, typeId byte, c *cryptoMetadata, encoding msdsn.EncodeParameters) (res typeInfo) {
+	res.TypeId = typeId
+	switch typeId {
 	case typeNull, typeInt1, typeBit, typeInt2, typeInt4, typeDateTim4,
 		typeFlt4, typeMoney, typeDateTime, typeFlt8, typeMoney4, typeInt8:
 		// those are fixed length types
@@ -148,7 +148,7 @@ func readTypeInfo(r *tdsBuffer) (res typeInfo) {
 		res.Reader = readFixedType
 		res.Buffer = make([]byte, res.Size)
 	default: // all others are VARLENTYPE
-		readVarLen(&res, r)
+		readVarLen(&res, r, c, encoding)
 	}
 	return
 }
@@ -783,7 +783,7 @@ func writePLPType(w io.Writer, ti typeInfo, buf []byte, encoding msdsn.EncodePar
 	}
 }
 
-func readVarLen(ti *typeInfo, r *tdsBuffer) {
+func readVarLen(ti *typeInfo, r *tdsBuffer, c *cryptoMetadata, encoding msdsn.EncodeParameters) {
 	switch ti.TypeId {
 	case typeDateN:
 		ti.Size = 3
