@@ -123,9 +123,13 @@ type xmlInfo struct {
 	XmlSchemaCollection string
 }
 
-func readTypeInfo(r *tdsBuffer, typeId byte, c *cryptoMetadata, encoding msdsn.EncodeParameters) (res typeInfo) {
-	res.TypeId = typeId
-	switch typeId {
+func ReadTypeInfo(r *tdsBuffer) typeInfo {
+	return readTypeInfo(r)
+}
+
+func readTypeInfo(r *tdsBuffer) (res typeInfo) {
+	res.TypeId = r.byte()
+	switch res.TypeId {
 	case typeNull, typeInt1, typeBit, typeInt2, typeInt4, typeDateTim4,
 		typeFlt4, typeMoney, typeDateTime, typeFlt8, typeMoney4, typeInt8:
 		// those are fixed length types
@@ -144,7 +148,7 @@ func readTypeInfo(r *tdsBuffer, typeId byte, c *cryptoMetadata, encoding msdsn.E
 		res.Reader = readFixedType
 		res.Buffer = make([]byte, res.Size)
 	default: // all others are VARLENTYPE
-		readVarLen(&res, r, c, encoding)
+		readVarLen(&res, r)
 	}
 	return
 }
@@ -293,14 +297,14 @@ func encodeDateTime(t time.Time) (res []byte) {
 	// days since Jan 1st 1900 (same TZ as t)
 	days := gregorianDays(t.Year(), t.YearDay()) - basedays
 	tm := 300*(t.Second()+t.Minute()*60+t.Hour()*60*60) + nanosToThreeHundredthsOfASecond(t.Nanosecond())
-	
+
 	// Handle day overflow when time calculation exceeds one day
 	// One day = 86400 seconds = 86400 * 300 three-hundredths = 25,920,000
 	if tm >= 300*86400 {
 		days++
 		tm = tm - 300*86400
 	}
-	
+
 	// minimum and maximum possible
 	mindays := gregorianDays(1753, 1) - basedays
 	maxdays := gregorianDays(9999, 365) - basedays
@@ -779,7 +783,7 @@ func writePLPType(w io.Writer, ti typeInfo, buf []byte, encoding msdsn.EncodePar
 	}
 }
 
-func readVarLen(ti *typeInfo, r *tdsBuffer, c *cryptoMetadata, encoding msdsn.EncodeParameters) {
+func readVarLen(ti *typeInfo, r *tdsBuffer) {
 	switch ti.TypeId {
 	case typeDateN:
 		ti.Size = 3

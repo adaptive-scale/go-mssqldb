@@ -767,6 +767,10 @@ func sendFedAuthInfo(w *tdsBuffer, fedAuth *featureExtFedAuth) (err error) {
 	return w.FinishPacket()
 }
 
+func ParseUCS2String(s []byte) (string, error) {
+	return ucs22str(s)
+}
+
 func readUcs2(r io.Reader, numchars int) (res string, err error) {
 	buf := make([]byte, numchars*2)
 	_, err = io.ReadFull(r, buf)

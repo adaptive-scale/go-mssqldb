@@ -59,6 +59,13 @@ type tdsBuffer struct {
 	afterFirst func()
 }
 
+func NewTdsBuffer(buff []byte, size int) *tdsBuffer {
+	return &tdsBuffer{
+		rbuf:  buff,
+		rsize: size,
+	}
+}
+
 func newTdsBuffer(bufsize uint16, transport io.ReadWriteCloser) *tdsBuffer {
 
 	// pull an existing buf if one is available or get and add a new buf to the bufpool
