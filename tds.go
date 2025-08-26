@@ -1248,6 +1248,10 @@ func getServerTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string, clientC
 	return tlsConn, nil
 }
 
+func Connect(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config) (res *tdsSession, err error) {
+	return connect(ctx, c, logger, p)
+}
+
 func connect(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config) (res *tdsSession, err error) {
 	isTransportEncrypted := false
 	// if instance is specified use instance resolution service
