@@ -805,6 +805,17 @@ func sendLogin(w *tdsBuffer, login *login) error {
 	return w.FinishPacket()
 }
 
+// http://msdn.microsoft.com/en-us/library/dd304019.aspx
+func sendServerLogin(w *tdsBuffer, bytes []byte, hdr *loginHeader) error {
+	// TODO: update creds as required
+
+	_, err := w.Write(bytes)
+	if err != nil {
+		return err
+	}
+	return w.FinishPacket()
+}
+
 // https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/827d9632-2957-4d54-b9ea-384530ae79d0
 func sendFedAuthInfo(w *tdsBuffer, fedAuth *featureExtFedAuth) (err error) {
 	fedauthtoken := str2ucs2(fedAuth.FedAuthToken)
@@ -1555,39 +1566,39 @@ initiate_connection:
 		fedAuth.ADALWorkflow = c.fedAuthADALWorkflow
 	}
 
-	clientFields, err := readClientPrelogin(clientOutbuf)
+	// Read raw prelogin request bytes from client
+	rawPreloginRequest, err := io.ReadAll(clientOutbuf)
 	if err != nil {
 		return nil, err
 	}
-	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client prelogin fields: %v", clientFields))
 
-	fields := sess.preparePreloginFields(ctx, p, fedAuth)
-
-	err = writePrelogin(packPrelogin, serverOutbuf, fields)
+	// Write the same bytes to the server
+	_, err = serverOutbuf.Write(rawPreloginRequest)
 	if err != nil {
 		return nil, err
 	}
 
 	// Read raw prelogin response bytes from server
-	rawPrelogin, err := io.ReadAll(serverOutbuf)
+	rawPreloginResponse, err := io.ReadAll(serverOutbuf)
 	if err != nil {
 		return nil, err
 	}
 
 	// Write the same bytes to the client
-	_, err = clientOutbuf.Write(rawPrelogin)
+	_, err = clientOutbuf.Write(rawPreloginResponse)
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse the prelogin response as before
-	// Create a tdsBuffer from rawPrelogin bytes
-	preloginBuf := newTdsBuffer(uint16(len(rawPrelogin)), &readWriteCloser{bytes.NewReader(rawPrelogin)})
-	fields, err = readPrelogin(preloginBuf)
+	// Create a tdsBuffer from rawPreloginResponse bytes
+	preloginBuf := newTdsBuffer(uint16(len(rawPreloginResponse)), &readWriteCloser{bytes.NewReader(rawPreloginResponse)})
+	fields, err := readPrelogin(preloginBuf)
 	if err != nil {
 		return nil, err
 	}
 
+	// TODO: try to get rid of fedAuth req here since it should be handled by client rather than in proxy
 	encrypt, err := interpretPreloginResponse(p, fedAuth, fields)
 	if err != nil {
 		return nil, err
@@ -1658,31 +1669,22 @@ initiate_connection:
 
 	}
 
-	auth, err := integratedauth.GetIntegratedAuthenticator(p)
+	// Read raw login request bytes from client
+	rawClientLoginRequest, err := io.ReadAll(clientOutbuf)
 	if err != nil {
-		if uint64(p.LogFlags)&logDebug != 0 {
-			logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Error while creating integrated authenticator: %v", err))
-		}
-
 		return nil, err
 	}
 
-	if auth != nil {
-		defer auth.Free()
-	}
+	// Create a tdsBuffer from rawClientLoginRequest bytes
+	clientLoginBuf := newTdsBuffer(uint16(len(rawClientLoginRequest)), &readWriteCloser{bytes.NewReader(rawClientLoginRequest)})
 
-	clientLogin, err := readClientLogin(clientOutbuf)
+	clientLogin, err := readClientLogin(clientLoginBuf)
 	if err != nil {
 		return nil, err
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
-	login, err := prepareLogin(ctx, c, p, logger, auth, fedAuth, uint32(serverOutbuf.PackageSize()))
-	if err != nil {
-		return nil, err
-	}
-
-	err = sendLogin(serverOutbuf, login)
+	err = sendServerLogin(serverOutbuf, rawClientLoginRequest, clientLogin)
 	if err != nil {
 		return nil, err
 	}
