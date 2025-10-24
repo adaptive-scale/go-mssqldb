@@ -1,6 +1,7 @@
 package mssql
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -284,10 +285,53 @@ func readPrelogin(r *tdsBuffer) (map[uint8][]byte, error) {
 		return nil, err
 	}
 	if packet_type != packReply {
-		return nil, errors.New("invalid respones, expected packet type 4, PRELOGIN RESPONSE")
+		return nil, errors.New("invalid response, expected packet type 4, PRELOGIN RESPONSE")
 	}
 	if len(struct_buf) == 0 {
 		return nil, errors.New("invalid empty PRELOGIN response, it must contain at least one byte")
+	}
+	offset := 0
+	results := map[uint8][]byte{}
+	for {
+		// read prelogin option
+		plOption, err := readPreloginOption(struct_buf, offset)
+		if err != nil {
+			return nil, err
+		}
+
+		if plOption.token == preloginTERMINATOR {
+			break
+		}
+
+		// TRACEID data is not returned from the server
+		if plOption.token != preloginTRACEID {
+
+			// read prelogin option data
+			value, err := readPreloginOptionData(plOption, struct_buf)
+			if err != nil {
+				return nil, err
+			}
+			results[plOption.token] = value
+		}
+		offset += preloginOptionSize
+	}
+	return results, nil
+}
+
+func readClientPrelogin(r *tdsBuffer) (map[uint8][]byte, error) {
+	packet_type, err := r.BeginRead()
+	if err != nil {
+		return nil, err
+	}
+	struct_buf, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if packet_type != packPrelogin {
+		return nil, errors.New("invalid respones, expected packet type 18, PRELOGIN REQUEST")
+	}
+	if len(struct_buf) == 0 {
+		return nil, errors.New("invalid empty PRELOGIN request, it must contain at least one byte")
 	}
 	offset := 0
 	results := map[uint8][]byte{}
@@ -358,6 +402,30 @@ func readPreloginOptionData(plOption *preloginOption, buffer []byte) ([]byte, er
 
 	value := buffer[plOption.offset : plOption.length+plOption.offset]
 	return value, nil
+}
+
+func readClientLogin(r *tdsBuffer) (*loginHeader, error) {
+	packet_type, err := r.BeginRead()
+	if err != nil {
+		return nil, err
+	}
+	struct_buf, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if packet_type != packLogin7 {
+		return nil, errors.New("invalid respones, expected packet type 16, LOGIN REQUEST")
+	}
+	if len(struct_buf) == 0 {
+		return nil, errors.New("invalid empty LOGIN request, it must contain at least one byte")
+	}
+
+	var header loginHeader
+	if err := binary.Read(bytes.NewReader(struct_buf), binary.LittleEndian, &header); err != nil {
+		return nil, err
+	}
+
+	return &header, nil
 }
 
 // OptionFlags1
@@ -958,6 +1026,18 @@ func sendAttention(buf *tdsBuffer) error {
 	return buf.FinishPacket()
 }
 
+type readWriteCloser struct {
+	*bytes.Reader
+}
+
+func (rwc *readWriteCloser) Write(p []byte) (int, error) {
+	return 0, io.ErrClosedPipe // Not used for reading
+}
+
+func (rwc *readWriteCloser) Close() error {
+	return nil
+}
+
 // Makes an attempt to connect with each available protocol, in order, until one succeeds or the timeout elapses
 func dialConnection(ctx context.Context, c *Connector, p *msdsn.Config, logger ContextLogger) (conn net.Conn, err error) {
 	var instances msdsn.BrowserData
@@ -1125,6 +1205,27 @@ func getTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string) (tlsConn *tls
 	//Set ALPN Sequence
 	config.NextProtos = []string{alpnSeq}
 	tlsConn = tls.Client(conn.c, config)
+	err = tlsConn.Handshake()
+	if err != nil {
+		return nil, fmt.Errorf("TLS Handshake failed: %w", err)
+	}
+	return tlsConn, nil
+}
+
+func getServerTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string) (tlsConn *tls.Conn, err error) {
+	var config *tls.Config
+	if pc := p.TLSConfig; pc != nil {
+		config = pc
+	}
+	if config == nil {
+		config, err = msdsn.SetupTLS("", false, p.Host, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	//Set ALPN Sequence
+	config.NextProtos = []string{alpnSeq}
+	tlsConn = tls.Server(conn.c, config)
 	err = tlsConn.Handshake()
 	if err != nil {
 		return nil, fmt.Errorf("TLS Handshake failed: %w", err)
@@ -1385,6 +1486,227 @@ initiate_connection:
 		}
 		goto initiate_connection
 	}
+	return sess, nil
+}
+
+func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config, clientConn net.Conn) (res *tdsSession, err error) {
+	isTransportEncrypted := false
+	// if instance is specified use instance resolution service
+	if len(p.Instance) > 0 && p.Port != 0 && uint64(p.LogFlags)&logDebug != 0 {
+		// both instance name and port specified
+		// when port is specified instance name is not used
+		// you should not provide instance name when you provide port
+		logger.Log(ctx, msdsn.LogDebug, "WARN: You specified both instance name and port in the connection string, port will be used and instance name will be ignored")
+	}
+
+	packetSize := p.PacketSize
+	if packetSize == 0 {
+		packetSize = defaultPacketSize
+	}
+	// Ensure packet size falls within the TDS protocol range of 512 to 32767 bytes
+	// NOTE: Encrypted connections have a maximum size of 16383 bytes.  If you request
+	// a higher packet size, the server will respond with an ENVCHANGE request to
+	// alter the packet size to 16383 bytes.
+	if packetSize < 512 {
+		packetSize = 512
+	} else if packetSize > 32767 {
+		packetSize = 32767
+	}
+
+initiate_connection:
+	dialCtx := ctx
+	if p.DialTimeout >= 0 {
+		dt := p.DialTimeout
+		if dt == 0 {
+			dt = time.Duration(15*len(p.Protocols)) * time.Second
+		}
+		var cancel func()
+		dialCtx, cancel = context.WithTimeout(ctx, dt)
+		defer cancel()
+	}
+	conn, err := dialConnection(dialCtx, c, &p, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	serverToconn := newTimeoutConn(conn, p.ConnTimeout)
+	serverOutbuf := newTdsBuffer(packetSize, serverToconn)
+	clientToconn := newTimeoutConn(clientConn, p.ConnTimeout)
+	clientOutbuf := newTdsBuffer(packetSize, clientToconn)
+
+	if p.Encryption == msdsn.EncryptionStrict {
+		serverOutbuf.transport, err = getTLSConn(serverToconn, p, "tds/8.0")
+		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0")
+		if err != nil {
+			return nil, err
+		}
+		isTransportEncrypted = true
+	}
+	sess := newSession(serverOutbuf, logger, p)
+
+	for i, p := range c.keyProviders {
+		sess.aeSettings.keyProviders[i] = p
+	}
+	fedAuth := &featureExtFedAuth{
+		FedAuthLibrary: FedAuthLibraryReserved,
+	}
+	if c.fedAuthRequired {
+		fedAuth.FedAuthLibrary = c.fedAuthLibrary
+		fedAuth.ADALWorkflow = c.fedAuthADALWorkflow
+	}
+
+	clientFields, err := readClientPrelogin(clientOutbuf)
+	if err != nil {
+		return nil, err
+	}
+	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client prelogin fields: %v", clientFields))
+
+	fields := sess.preparePreloginFields(ctx, p, fedAuth)
+
+	err = writePrelogin(packPrelogin, serverOutbuf, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read raw prelogin response bytes from server
+	rawPrelogin, err := io.ReadAll(serverOutbuf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write the same bytes to the client
+	_, err = clientOutbuf.Write(rawPrelogin)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the prelogin response as before
+	// Create a tdsBuffer from rawPrelogin bytes
+	preloginBuf := newTdsBuffer(uint16(len(rawPrelogin)), &readWriteCloser{bytes.NewReader(rawPrelogin)})
+	fields, err = readPrelogin(preloginBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	encrypt, err := interpretPreloginResponse(p, fedAuth, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	//We need not perform TLS handshake if the communication channel is already encrypted (encrypt=strict)
+	if !isTransportEncrypted {
+		if encrypt != encryptNotSup {
+			var config *tls.Config
+			if pc := p.TLSConfig; pc != nil {
+				config = pc
+				if !config.DynamicRecordSizingDisabled {
+					config = config.Clone()
+
+					// fix for https://github.com/microsoft/go-mssqldb/issues/166
+					// Go implementation of TLS payload size heuristic algorithm splits single TDS package to multiple TCP segments,
+					// while SQL Server seems to expect one TCP segment per encrypted TDS package.
+					// Setting DynamicRecordSizingDisabled to true disables that algorithm and uses 16384 bytes per TLS package
+					config.DynamicRecordSizingDisabled = true
+				}
+			}
+			if config == nil {
+				config, err = msdsn.SetupTLS("", false, p.Host, "")
+				if err != nil {
+					return nil, err
+				}
+
+			}
+
+			// setting up connection handler which will allow wrapping of TLS handshake packets inside TDS stream
+			handshakeConn := tlsHandshakeConn{buf: serverOutbuf}
+			passthrough := passthroughConn{c: &handshakeConn}
+			tlsConn := tls.Client(&passthrough, config)
+			err = tlsConn.Handshake()
+			if err != nil {
+				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
+			}
+			// Flush any pending packet from the handshake
+			// The driver's Finished message is still in the buffer
+			_, err = handshakeConn.FinishPacket()
+			if err != nil {
+				return nil, fmt.Errorf("TLS Handshake flush failed: %w", err)
+			}
+			passthrough.c = serverToconn
+			serverOutbuf.transport = tlsConn
+			if encrypt == encryptOff {
+				serverOutbuf.afterFirst = func() {
+					serverOutbuf.transport = serverToconn
+				}
+			}
+
+			// setting up connection handler with client which will allow wrapping of TLS handshake packets inside TDS stream
+			clientHandshakeConn := tlsHandshakeConn{buf: clientOutbuf}
+			clientPassthrough := passthroughConn{c: &clientHandshakeConn}
+			clientTlsConn := tls.Server(&clientPassthrough, config)
+			err = clientTlsConn.Handshake()
+			if err != nil {
+				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
+			}
+			clientPassthrough.c = clientToconn
+			clientOutbuf.transport = clientTlsConn
+			if encrypt == encryptOff {
+				clientOutbuf.afterFirst = func() {
+					clientOutbuf.transport = clientToconn
+				}
+			}
+		}
+
+	}
+
+	auth, err := integratedauth.GetIntegratedAuthenticator(p)
+	if err != nil {
+		if uint64(p.LogFlags)&logDebug != 0 {
+			logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Error while creating integrated authenticator: %v", err))
+		}
+
+		return nil, err
+	}
+
+	if auth != nil {
+		defer auth.Free()
+	}
+
+	clientLogin, err := readClientLogin(clientOutbuf)
+	if err != nil {
+		return nil, err
+	}
+	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
+
+	login, err := prepareLogin(ctx, c, p, logger, auth, fedAuth, uint32(serverOutbuf.PackageSize()))
+	if err != nil {
+		return nil, err
+	}
+
+	err = sendLogin(serverOutbuf, login)
+	if err != nil {
+		return nil, err
+	}
+
+	if sess.routedServer != "" {
+		serverToconn.Close()
+		// Need to handle case when routedServer is in "host\instance" format.
+		routedParts := strings.SplitN(sess.routedServer, "\\", 2)
+		p.Host = routedParts[0]
+		if len(routedParts) == 2 {
+			p.Instance = routedParts[1]
+		}
+		p.Port = uint64(sess.routedPort)
+		if !p.HostInCertificateProvided && p.TLSConfig != nil {
+			p.TLSConfig = p.TLSConfig.Clone()
+			p.TLSConfig.ServerName = p.Host
+		}
+		goto initiate_connection
+	}
+
+	// Start bidirectional copy
+	go io.Copy(serverOutbuf, clientOutbuf)
+	io.Copy(clientOutbuf, serverOutbuf)
+
 	return sess, nil
 }
 
