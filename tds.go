@@ -1567,32 +1567,32 @@ initiate_connection:
 	}
 
 	// Read raw prelogin request bytes from client
-	rawPreloginRequest, err := io.ReadAll(clientOutbuf)
+	err = clientOutbuf.readNextPacket()
 	if err != nil {
 		return nil, err
 	}
 
 	// Write the same bytes to the server
-	_, err = serverOutbuf.Write(rawPreloginRequest)
+	_, err = serverOutbuf.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
 
 	// Read raw prelogin response bytes from server
-	rawPreloginResponse, err := io.ReadAll(serverOutbuf)
+	err = serverOutbuf.readNextPacket()
 	if err != nil {
 		return nil, err
 	}
 
 	// Write the same bytes to the client
-	_, err = clientOutbuf.Write(rawPreloginResponse)
+	_, err = clientOutbuf.Write(serverOutbuf.rbuf[:serverOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse the prelogin response as before
 	// Create a tdsBuffer from rawPreloginResponse bytes
-	preloginBuf := newTdsBuffer(uint16(len(rawPreloginResponse)), &readWriteCloser{bytes.NewReader(rawPreloginResponse)})
+	preloginBuf := newTdsBuffer(uint16(len(serverOutbuf.rbuf[:serverOutbuf.rsize])), &readWriteCloser{bytes.NewReader(serverOutbuf.rbuf[:serverOutbuf.rsize])})
 	fields, err := readPrelogin(preloginBuf)
 	if err != nil {
 		return nil, err
@@ -1670,13 +1670,13 @@ initiate_connection:
 	}
 
 	// Read raw login request bytes from client
-	rawClientLoginRequest, err := io.ReadAll(clientOutbuf)
+	err = clientOutbuf.readNextPacket()
 	if err != nil {
 		return nil, err
 	}
 
 	// Create a tdsBuffer from rawClientLoginRequest bytes
-	clientLoginBuf := newTdsBuffer(uint16(len(rawClientLoginRequest)), &readWriteCloser{bytes.NewReader(rawClientLoginRequest)})
+	clientLoginBuf := newTdsBuffer(uint16(len(clientOutbuf.rbuf[:clientOutbuf.rsize])), &readWriteCloser{bytes.NewReader(clientOutbuf.rbuf[:clientOutbuf.rsize])})
 
 	clientLogin, err := readClientLogin(clientLoginBuf)
 	if err != nil {
@@ -1684,7 +1684,7 @@ initiate_connection:
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
-	err = sendServerLogin(serverOutbuf, rawClientLoginRequest, clientLogin)
+	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize], clientLogin)
 	if err != nil {
 		return nil, err
 	}
