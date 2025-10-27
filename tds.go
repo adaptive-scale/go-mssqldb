@@ -1651,10 +1651,15 @@ initiate_connection:
 				}
 			}
 
+			clientConfig, err := msdsn.SetupTLS("server.crt", false, p.Host, "")
+			if err != nil {
+				return nil, err
+			}
+
 			// setting up connection handler with client which will allow wrapping of TLS handshake packets inside TDS stream
 			clientHandshakeConn := tlsHandshakeConn{buf: clientOutbuf}
 			clientPassthrough := passthroughConn{c: &clientHandshakeConn}
-			clientTlsConn := tls.Server(&clientPassthrough, config)
+			clientTlsConn := tls.Server(&clientPassthrough, clientConfig)
 			err = clientTlsConn.Handshake()
 			if err != nil {
 				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
