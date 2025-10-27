@@ -407,13 +407,13 @@ func (d *Driver) open(ctx context.Context, dsn string) (*Conn, error) {
 	return d.connect(ctx, c, params)
 }
 
-func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn) (*Conn, error) {
+func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn, clientCert string) (*Conn, error) {
 	params, err := msdsn.Parse(dsn)
 	if err != nil {
 		return nil, err
 	}
 	c := newConnector(params, nil)
-	return connectProxy(ctx, c, params, logger, clientConn)
+	return connectProxy(ctx, c, params, logger, clientConn, clientCert)
 }
 
 // connect to the server, using the provided context for dialing only.
@@ -449,8 +449,8 @@ func (d *Driver) connect(ctx context.Context, c *Connector, params msdsn.Config)
 }
 
 // connect to the server, using the provided context for dialing only.
-func connectProxy(ctx context.Context, c *Connector, params msdsn.Config, logger ContextLogger, clientConn net.Conn) (*Conn, error) {
-	sess, err := internalConnectProxy(ctx, c, logger, params, clientConn)
+func connectProxy(ctx context.Context, c *Connector, params msdsn.Config, logger ContextLogger, clientConn net.Conn, clientCert string) (*Conn, error) {
+	sess, err := internalConnectProxy(ctx, c, logger, params, clientConn, clientCert)
 	if err != nil {
 		// main server failed, try fail-over partner
 		if params.FailOverPartner == "" {
@@ -462,7 +462,7 @@ func connectProxy(ctx context.Context, c *Connector, params msdsn.Config, logger
 			params.Port = params.FailOverPort
 		}
 
-		sess, err = internalConnectProxy(ctx, c, logger, params, clientConn)
+		sess, err = internalConnectProxy(ctx, c, logger, params, clientConn, clientCert)
 		if err != nil {
 			// fail-over partner also failed, now fail
 			return nil, err
