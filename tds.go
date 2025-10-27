@@ -1573,10 +1573,11 @@ initiate_connection:
 	}
 
 	// Write the same bytes to the server
-	_, err = serverOutbuf.Write(clientOutbuf.rbuf)
+	total, err := serverOutbuf.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
+	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Total bytes written: %v", total))
 
 	// Read raw prelogin response bytes from server
 	err = serverOutbuf.readNextPacket()
@@ -1585,14 +1586,14 @@ initiate_connection:
 	}
 
 	// Write the same bytes to the client
-	_, err = clientOutbuf.Write(serverOutbuf.rbuf)
+	_, err = clientOutbuf.Write(serverOutbuf.rbuf[:serverOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse the prelogin response as before
 	// Create a tdsBuffer from rawPreloginResponse bytes
-	preloginBuf := newTdsBuffer(uint16(len(serverOutbuf.rbuf)), &readWriteCloser{bytes.NewReader(serverOutbuf.rbuf)})
+	preloginBuf := newTdsBuffer(uint16(len(serverOutbuf.rbuf[:serverOutbuf.rsize])), &readWriteCloser{bytes.NewReader(serverOutbuf.rbuf[:serverOutbuf.rsize])})
 	fields, err := readPrelogin(preloginBuf)
 	if err != nil {
 		return nil, err
@@ -1676,7 +1677,7 @@ initiate_connection:
 	}
 
 	// Create a tdsBuffer from rawClientLoginRequest bytes
-	clientLoginBuf := newTdsBuffer(uint16(len(clientOutbuf.rbuf)), &readWriteCloser{bytes.NewReader(clientOutbuf.rbuf)})
+	clientLoginBuf := newTdsBuffer(uint16(len(clientOutbuf.rbuf[:clientOutbuf.rsize])), &readWriteCloser{bytes.NewReader(clientOutbuf.rbuf[:clientOutbuf.rsize])})
 
 	clientLogin, err := readClientLogin(clientLoginBuf)
 	if err != nil {
@@ -1684,7 +1685,7 @@ initiate_connection:
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
-	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf, clientLogin)
+	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize], clientLogin)
 	if err != nil {
 		return nil, err
 	}
