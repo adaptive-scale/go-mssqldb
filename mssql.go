@@ -2,6 +2,7 @@ package mssql
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -407,7 +408,7 @@ func (d *Driver) open(ctx context.Context, dsn string) (*Conn, error) {
 	return d.connect(ctx, c, params)
 }
 
-func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn, clientCert string) (*Conn, error) {
+func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn, clientCert tls.Certificate) (*Conn, error) {
 	params, err := msdsn.Parse(dsn)
 	if err != nil {
 		return nil, err
@@ -449,7 +450,7 @@ func (d *Driver) connect(ctx context.Context, c *Connector, params msdsn.Config)
 }
 
 // connect to the server, using the provided context for dialing only.
-func connectProxy(ctx context.Context, c *Connector, params msdsn.Config, logger ContextLogger, clientConn net.Conn, clientCert string) (*Conn, error) {
+func connectProxy(ctx context.Context, c *Connector, params msdsn.Config, logger ContextLogger, clientConn net.Conn, clientCert tls.Certificate) (*Conn, error) {
 	sess, err := internalConnectProxy(ctx, c, logger, params, clientConn, clientCert)
 	if err != nil {
 		// main server failed, try fail-over partner

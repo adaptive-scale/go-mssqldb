@@ -192,6 +192,14 @@ func readCertificate(certificate string) ([]byte, error) {
 	}
 }
 
+func SetupClientTLS(cert tls.Certificate) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	return tlsConfig, nil
+}
+
 // Build a tls.Config object from the supplied certificate.
 func SetupTLS(certificate string, insecureSkipVerify bool, hostInCertificate string, minTLSVersion string) (*tls.Config, error) {
 	config := tls.Config{
