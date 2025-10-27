@@ -1525,17 +1525,17 @@ func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogge
 	}
 
 initiate_connection:
-	dialCtx := ctx
-	if p.DialTimeout >= 0 {
-		dt := p.DialTimeout
-		if dt == 0 {
-			dt = time.Duration(15*len(p.Protocols)) * time.Second
-		}
-		var cancel func()
-		dialCtx, cancel = context.WithTimeout(ctx, dt)
-		defer cancel()
-	}
-	conn, err := dialConnection(dialCtx, c, &p, logger)
+	//dialCtx := ctx
+	//if p.DialTimeout >= 0 {
+	//	dt := p.DialTimeout
+	//	if dt == 0 {
+	//		dt = time.Duration(15*len(p.Protocols)) * time.Second
+	//	}
+	//	var cancel func()
+	//	dialCtx, cancel = context.WithTimeout(ctx, dt)
+	//	defer cancel()
+	//}
+	conn, err := net.Dial("tcp", "34.72.82.5:1433")
 	if err != nil {
 		return nil, err
 	}
