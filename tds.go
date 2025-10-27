@@ -1500,7 +1500,7 @@ initiate_connection:
 	return sess, nil
 }
 
-func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config, clientConn net.Conn) (res *tdsSession, err error) {
+func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config, clientConn net.Conn, clientCert string) (res *tdsSession, err error) {
 	isTransportEncrypted := false
 	// if instance is specified use instance resolution service
 	if len(p.Instance) > 0 && p.Port != 0 && uint64(p.LogFlags)&logDebug != 0 {
@@ -1651,7 +1651,7 @@ initiate_connection:
 				}
 			}
 
-			clientConfig, err := msdsn.SetupTLS("server.crt", false, p.Host, "")
+			clientConfig, err := msdsn.SetupTLS(clientCert, false, p.Host, "")
 			if err != nil {
 				return nil, err
 			}
