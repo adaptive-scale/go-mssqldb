@@ -1223,16 +1223,10 @@ func getTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string) (tlsConn *tls
 	return tlsConn, nil
 }
 
-func getServerTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string) (tlsConn *tls.Conn, err error) {
-	var config *tls.Config
-	if pc := p.TLSConfig; pc != nil {
-		config = pc
-	}
-	if config == nil {
-		config, err = msdsn.SetupTLS("", false, p.Host, "")
-		if err != nil {
-			return nil, err
-		}
+func getServerTLSConn(conn *timeoutConn, p msdsn.Config, alpnSeq string, clientCert tls.Certificate) (tlsConn *tls.Conn, err error) {
+	config, err := msdsn.SetupClientTLS(clientCert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup TLS config: %w", err)
 	}
 	//Set ALPN Sequence
 	config.NextProtos = []string{alpnSeq}
@@ -1547,7 +1541,7 @@ initiate_connection:
 
 	if p.Encryption == msdsn.EncryptionStrict {
 		serverOutbuf.transport, err = getTLSConn(serverToconn, p, "tds/8.0")
-		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0")
+		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", clientCert)
 		if err != nil {
 			return nil, err
 		}
