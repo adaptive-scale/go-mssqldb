@@ -809,11 +809,11 @@ func sendLogin(w *tdsBuffer, login *login) error {
 func sendServerLogin(w *tdsBuffer, bytes []byte, hdr *loginHeader) error {
 	// TODO: update creds as required
 
-	_, err := w.Write(bytes)
+	_, err := w.transport.Write(bytes)
 	if err != nil {
 		return err
 	}
-	return w.FinishPacket()
+	return nil
 }
 
 // https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/827d9632-2957-4d54-b9ea-384530ae79d0
@@ -1525,17 +1525,17 @@ func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogge
 	}
 
 initiate_connection:
-	//dialCtx := ctx
-	//if p.DialTimeout >= 0 {
-	//	dt := p.DialTimeout
-	//	if dt == 0 {
-	//		dt = time.Duration(15*len(p.Protocols)) * time.Second
-	//	}
-	//	var cancel func()
-	//	dialCtx, cancel = context.WithTimeout(ctx, dt)
-	//	defer cancel()
-	//}
-	conn, err := net.Dial("tcp", "34.72.82.5:1433")
+	dialCtx := ctx
+	if p.DialTimeout >= 0 {
+		dt := p.DialTimeout
+		if dt == 0 {
+			dt = time.Duration(15*len(p.Protocols)) * time.Second
+		}
+		var cancel func()
+		dialCtx, cancel = context.WithTimeout(ctx, dt)
+		defer cancel()
+	}
+	conn, err := dialConnection(dialCtx, c, &p, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1573,7 +1573,7 @@ initiate_connection:
 	}
 
 	// Write the same bytes to the server
-	total, err := serverOutbuf.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
+	total, err := serverOutbuf.transport.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
@@ -1586,7 +1586,7 @@ initiate_connection:
 	}
 
 	// Write the same bytes to the client
-	_, err = clientOutbuf.Write(serverOutbuf.rbuf[:serverOutbuf.rsize])
+	_, err = clientOutbuf.transport.Write(serverOutbuf.rbuf[:serverOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
@@ -1707,8 +1707,8 @@ initiate_connection:
 	}
 
 	// Start bidirectional copy
-	go io.Copy(serverOutbuf, clientOutbuf)
-	io.Copy(clientOutbuf, serverOutbuf)
+	go io.Copy(serverOutbuf.transport, clientOutbuf.transport)
+	io.Copy(clientOutbuf.transport, serverOutbuf.transport)
 
 	return sess, nil
 }
