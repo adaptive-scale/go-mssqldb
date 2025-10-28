@@ -1113,7 +1113,7 @@ func interpretPreloginResponse(p msdsn.Config, fe *featureExtFedAuth, fields map
 		return 0, fmt.Errorf("encrypt negotiation failed")
 	}
 	encrypt = encryptBytes[0]
-	if p.Encryption == msdsn.EncryptionRequired && (encrypt == encryptNotSup || encrypt == encryptOff) {
+	if p.Encryption == msdsn.EncryptionRequired && (encrypt == encryptNotSup) {
 		return 0, fmt.Errorf("server does not support encryption")
 	}
 
