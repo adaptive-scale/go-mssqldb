@@ -409,9 +409,9 @@ func (d *Driver) open(ctx context.Context, dsn string) (*Conn, error) {
 }
 
 type ProxyDetails struct {
-	clientCert       tls.Certificate
-	frontendPassword string
-	backendPassword  string
+	ClientCert       tls.Certificate
+	FrontendPassword string
+	BackendPassword  string
 }
 
 func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn, proxyDetails ProxyDetails) (*Conn, error) {

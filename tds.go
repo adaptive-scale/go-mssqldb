@@ -1553,7 +1553,7 @@ initiate_connection:
 
 	if p.Encryption == msdsn.EncryptionStrict {
 		serverOutbuf.transport, err = getTLSConn(serverToconn, p, "tds/8.0")
-		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", proxyDetails.clientCert)
+		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", proxyDetails.ClientCert)
 		if err != nil {
 			return nil, err
 		}
@@ -1657,7 +1657,7 @@ initiate_connection:
 				}
 			}
 
-			clientConfig, err := msdsn.SetupClientTLS(proxyDetails.clientCert)
+			clientConfig, err := msdsn.SetupClientTLS(proxyDetails.ClientCert)
 			if err != nil {
 				return nil, err
 			}
@@ -1746,11 +1746,11 @@ func validateAndUpdateClientLogin(buf *tdsBuffer, header *loginHeader, proxyDeta
 		return err
 	}
 
-	if providedPassword != proxyDetails.frontendPassword {
+	if providedPassword != proxyDetails.FrontendPassword {
 		return fmt.Errorf("invalid password")
 	}
 
-	replacePassword := manglePassword(proxyDetails.backendPassword)
+	replacePassword := manglePassword(proxyDetails.BackendPassword)
 
 	if len(replacePassword) != int(header.PasswordLength)*2 {
 		return fmt.Errorf("invalid password")
