@@ -1658,6 +1658,12 @@ initiate_connection:
 			if err != nil {
 				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
 			}
+
+			_, err = clientHandshakeConn.FinishPacket()
+			if err != nil {
+				return nil, fmt.Errorf("Client TLS Handshake flush failed: %w", err)
+			}
+
 			clientPassthrough.c = clientToconn
 			clientOutbuf.transport = clientTlsConn
 			if encrypt == encryptOff {

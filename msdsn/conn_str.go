@@ -195,7 +195,6 @@ func readCertificate(certificate string) ([]byte, error) {
 func SetupClientTLS(cert tls.Certificate) (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   TLSVersionFromString("1.3"),
 	}
 
 	return tlsConfig, nil
