@@ -665,6 +665,18 @@ func manglePassword(password string) []byte {
 	return ucs2password
 }
 
+func unmanglePassword(mangledPassword []byte) []byte {
+	ucs2password := make([]byte, len(mangledPassword))
+
+	for i, ch := range mangledPassword {
+		// Reverse: first XOR with 0xA5, then reverse the bit rotation
+		ch = ch ^ 0xA5
+		ucs2password[i] = ((ch << 4) & 0xff) | (ch >> 4)
+	}
+
+	return ucs2password
+}
+
 // http://msdn.microsoft.com/en-us/library/dd304019.aspx
 func sendLogin(w *tdsBuffer, login *login) error {
 	w.BeginPacket(packLogin7, false)
@@ -1494,7 +1506,7 @@ initiate_connection:
 	return sess, nil
 }
 
-func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config, clientConn net.Conn, clientCert tls.Certificate) (res *tdsSession, err error) {
+func internalConnectProxy(ctx context.Context, c *Connector, logger ContextLogger, p msdsn.Config, clientConn net.Conn, proxyDetails ProxyDetails) (res *tdsSession, err error) {
 	isTransportEncrypted := false
 	// if instance is specified use instance resolution service
 	if len(p.Instance) > 0 && p.Port != 0 && uint64(p.LogFlags)&logDebug != 0 {
@@ -1541,7 +1553,7 @@ initiate_connection:
 
 	if p.Encryption == msdsn.EncryptionStrict {
 		serverOutbuf.transport, err = getTLSConn(serverToconn, p, "tds/8.0")
-		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", clientCert)
+		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", proxyDetails.clientCert)
 		if err != nil {
 			return nil, err
 		}
@@ -1645,7 +1657,7 @@ initiate_connection:
 				}
 			}
 
-			clientConfig, err := msdsn.SetupClientTLS(clientCert)
+			clientConfig, err := msdsn.SetupClientTLS(proxyDetails.clientCert)
 			if err != nil {
 				return nil, err
 			}
@@ -1690,6 +1702,11 @@ initiate_connection:
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
+	err = validateAndUpdateClientLogin(clientLoginBuf, clientLogin, proxyDetails)
+	if err != nil {
+		return nil, err
+	}
+
 	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize], clientLogin)
 	if err != nil {
 		return nil, err
@@ -1716,6 +1733,32 @@ initiate_connection:
 	io.Copy(clientOutbuf.transport, serverOutbuf.transport)
 
 	return sess, nil
+}
+
+func validateAndUpdateClientLogin(buf *tdsBuffer, header *loginHeader, proxyDetails ProxyDetails) error {
+	if buf.rsize < int(header.PasswordOffset)+int(header.PasswordLength)*2 {
+		return fmt.Errorf("invalid password length")
+	}
+
+	providedPassword, err := ucs22str(unmanglePassword(buf.rbuf[header.PasswordOffset : header.PasswordOffset+header.PasswordLength*2]))
+
+	if err != nil {
+		return err
+	}
+
+	if providedPassword != proxyDetails.frontendPassword {
+		return fmt.Errorf("invalid password")
+	}
+
+	replacePassword := manglePassword(proxyDetails.backendPassword)
+
+	if len(replacePassword) != int(header.PasswordLength)*2 {
+		return fmt.Errorf("invalid password")
+	}
+
+	copy(buf.rbuf[header.PasswordOffset:header.PasswordOffset+header.PasswordLength*2], replacePassword)
+
+	return nil
 }
 
 type featureExtColumnEncryption struct {
