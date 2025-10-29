@@ -818,9 +818,7 @@ func sendLogin(w *tdsBuffer, login *login) error {
 }
 
 // http://msdn.microsoft.com/en-us/library/dd304019.aspx
-func sendServerLogin(w *tdsBuffer, bytes []byte, hdr *loginHeader) error {
-	// TODO: update creds as required
-
+func sendServerLogin(w *tdsBuffer, bytes []byte) error {
 	_, err := w.transport.Write(bytes)
 	if err != nil {
 		return err
@@ -1702,12 +1700,12 @@ initiate_connection:
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
-	err = validateAndUpdateClientLogin(clientLoginBuf, clientLogin, proxyDetails)
+	err = validateAndUpdateClientLogin(clientOutbuf, clientLogin, proxyDetails)
 	if err != nil {
 		return nil, err
 	}
 
-	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize], clientLogin)
+	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
 		return nil, err
 	}
