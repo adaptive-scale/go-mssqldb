@@ -1736,11 +1736,15 @@ initiate_connection:
 }
 
 func validateAndUpdateClientLogin(buf *tdsBuffer, header *loginHeader, proxyDetails ProxyDetails) error {
-	if buf.rsize < int(header.PasswordOffset)+int(header.PasswordLength)*2 {
+
+	passwordStartIndex := headerSize + int(header.PasswordOffset)
+	passwordEndIndex := passwordStartIndex + int(header.PasswordLength)*2
+
+	if buf.rsize < passwordEndIndex {
 		return fmt.Errorf("invalid password length")
 	}
 
-	providedPassword, err := ucs22str(unmanglePassword(buf.rbuf[header.PasswordOffset : header.PasswordOffset+header.PasswordLength*2]))
+	providedPassword, err := ucs22str(unmanglePassword(buf.rbuf[passwordStartIndex:passwordEndIndex]))
 
 	if err != nil {
 		return err
@@ -1756,7 +1760,7 @@ func validateAndUpdateClientLogin(buf *tdsBuffer, header *loginHeader, proxyDeta
 		return fmt.Errorf("invalid password")
 	}
 
-	copy(buf.rbuf[header.PasswordOffset:header.PasswordOffset+header.PasswordLength*2], replacePassword)
+	copy(buf.rbuf[passwordStartIndex:passwordEndIndex], replacePassword)
 
 	return nil
 }
