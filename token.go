@@ -894,6 +894,83 @@ func parseError72(r *tdsBuffer) (res Error) {
 	return
 }
 
+func writeError72(w *tdsBuffer, msg Error) error {
+	var err error
+
+	w.BeginPacket(packReply, false)
+
+	// ERROR token
+	err = w.WriteByte(0xAA)
+	if err != nil {
+		return err
+	}
+
+	// Calculate the length of the error structure
+	length := 4 + // Number (int32)
+		1 + // State (byte)
+		1 + // Class (byte)
+		2 + len([]rune(msg.Message))*2 + // UsVarChar (uint16 length + UTF-16 string)
+		1 + len(msg.ServerName) + // BVarChar (byte length + string)
+		1 + len(msg.ProcName) + // BVarChar (byte length + string)
+		4 // LineNo (int32)
+
+	err = binary.Write(w, binary.LittleEndian, uint16(length))
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, binary.LittleEndian, msg.Number)
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, binary.LittleEndian, msg.State)
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, binary.LittleEndian, msg.Class)
+	if err != nil {
+		return err
+	}
+	err = writeUsVarChar(w, msg.Message)
+	if err != nil {
+		return err
+	}
+	err = writeBVarChar(w, msg.ServerName)
+	if err != nil {
+		return err
+	}
+	err = writeBVarChar(w, msg.ProcName)
+	if err != nil {
+		return err
+	}
+	err = binary.Write(w, binary.LittleEndian, msg.LineNo)
+	if err != nil {
+		return err
+	}
+
+	err = w.FinishPacket()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Simple error sender - most common use case
+func writeSQLErrorSimple(outbuf *tdsBuffer, message, procName string, lineNo int) error {
+	// Severity 16 = general error
+	// Error 50000 = user-defined error
+	// State 1 = default state
+	return writeError72(outbuf, Error{
+		Number:     50000,
+		State:      1,
+		Class:      16,
+		Message:    message,
+		ServerName: "mssql-proxy",
+		ProcName:   procName,
+		LineNo:     int32(lineNo),
+	})
+}
+
 // http://msdn.microsoft.com/en-us/library/dd304156.aspx
 func parseInfo(r *tdsBuffer) (res Error) {
 	length := r.uint16()
