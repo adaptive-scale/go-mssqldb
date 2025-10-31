@@ -955,6 +955,22 @@ func writeError72(w *tdsBuffer, msg Error) error {
 	return nil
 }
 
+// Simple error sender - most common use case
+func writeSQLErrorSimple(outbuf *tdsBuffer, message, procName string, lineNo int) error {
+	// Severity 16 = general error
+	// Error 50000 = user-defined error
+	// State 1 = default state
+	return writeError72(outbuf, Error{
+		Number:     50000,
+		State:      1,
+		Class:      16,
+		Message:    message,
+		ServerName: "mssql-proxy",
+		ProcName:   procName,
+		LineNo:     int32(lineNo),
+	})
+}
+
 // http://msdn.microsoft.com/en-us/library/dd304156.aspx
 func parseInfo(r *tdsBuffer) (res Error) {
 	length := r.uint16()

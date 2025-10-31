@@ -1551,6 +1551,9 @@ initiate_connection:
 
 	if p.Encryption == msdsn.EncryptionStrict {
 		serverOutbuf.transport, err = getTLSConn(serverToconn, p, "tds/8.0")
+		if err != nil {
+			return nil, err
+		}
 		clientOutbuf.transport, err = getServerTLSConn(clientToconn, p, "tds/8.0", proxyDetails.ClientCert)
 		if err != nil {
 			return nil, err
@@ -1573,12 +1576,20 @@ initiate_connection:
 	// Read raw prelogin request bytes from client
 	err = clientOutbuf.readNextPacket()
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "read_prelogin_request", 1577)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
 	// Write the same bytes to the server
 	total, err := serverOutbuf.transport.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "write_prelogin_request", 1587)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Total bytes written: %v", total))
@@ -1586,12 +1597,20 @@ initiate_connection:
 	// Read raw prelogin response bytes from server
 	err = serverOutbuf.readNextPacket()
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "read_prelogin_response", 1598)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
 	// Write the same bytes to the client
 	_, err = clientOutbuf.transport.Write(serverOutbuf.rbuf[:serverOutbuf.rsize])
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "write_prelogin_response", 1608)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
@@ -1600,12 +1619,20 @@ initiate_connection:
 	preloginBuf := newTdsBuffer(uint16(len(serverOutbuf.rbuf[:serverOutbuf.rsize])), &readWriteCloser{bytes.NewReader(serverOutbuf.rbuf[:serverOutbuf.rsize])})
 	fields, err := readPrelogin(preloginBuf)
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "parse_prelogin_response", 1620)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
 	// TODO: try to get rid of fedAuth req here since it should be handled by client rather than in proxy
 	encrypt, err := interpretPreloginResponse(p, fedAuth, fields)
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "parse_prelogin_response", 1630)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
@@ -1628,6 +1655,10 @@ initiate_connection:
 			if config == nil {
 				config, err = msdsn.SetupTLS("", false, p.Host, "")
 				if err != nil {
+					writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "server_tls_handshake", 1656)
+					if writeErr != nil {
+						return nil, writeErr
+					}
 					return nil, err
 				}
 
@@ -1639,12 +1670,20 @@ initiate_connection:
 			tlsConn := tls.Client(&passthrough, config)
 			err = tlsConn.Handshake()
 			if err != nil {
+				writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "server_tls_handshake", 1671)
+				if writeErr != nil {
+					return nil, writeErr
+				}
 				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
 			}
 			// Flush any pending packet from the handshake
 			// The driver's Finished message is still in the buffer
 			_, err = handshakeConn.FinishPacket()
 			if err != nil {
+				writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "server_tls_handshake", 1681)
+				if writeErr != nil {
+					return nil, writeErr
+				}
 				return nil, fmt.Errorf("TLS Handshake flush failed: %w", err)
 			}
 			passthrough.c = serverToconn
@@ -1657,6 +1696,10 @@ initiate_connection:
 
 			clientConfig, err := msdsn.SetupClientTLS(proxyDetails.ClientCert)
 			if err != nil {
+				writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "client_tls_handshake", 1697)
+				if writeErr != nil {
+					return nil, writeErr
+				}
 				return nil, err
 			}
 
@@ -1666,11 +1709,19 @@ initiate_connection:
 			clientTlsConn := tls.Server(&clientPassthrough, clientConfig)
 			err = clientTlsConn.Handshake()
 			if err != nil {
+				writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "client_tls_handshake", 1710)
+				if writeErr != nil {
+					return nil, writeErr
+				}
 				return nil, fmt.Errorf("TLS Handshake failed: %v", err)
 			}
 
 			_, err = clientHandshakeConn.FinishPacket()
 			if err != nil {
+				writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "client_tls_handshake", 1719)
+				if writeErr != nil {
+					return nil, writeErr
+				}
 				return nil, fmt.Errorf("Client TLS Handshake flush failed: %w", err)
 			}
 
@@ -1688,6 +1739,10 @@ initiate_connection:
 	// Read raw login request bytes from client
 	err = clientOutbuf.readNextPacket()
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "read_client_login", 1740)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
@@ -1696,29 +1751,29 @@ initiate_connection:
 
 	clientLogin, err := readClientLogin(clientLoginBuf)
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "parse_client_login", 1752)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
 	err = validateAndUpdateClientLogin(clientOutbuf, clientLogin, proxyDetails)
 	if err != nil {
-		err = writeError72(clientOutbuf, Error{
-			Number:     0,
-			State:      0,
-			Class:      0,
-			Message:    err.Error(),
-			ServerName: "",
-			ProcName:   "",
-			LineNo:     0,
-		})
-		if err != nil {
-			return nil, err
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "validate_login", 1762)
+		if writeErr != nil {
+			return nil, writeErr
 		}
 		return nil, err
 	}
 
 	err = sendServerLogin(serverOutbuf, clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "send_login", 1771)
+		if writeErr != nil {
+			return nil, writeErr
+		}
 		return nil, err
 	}
 
@@ -1739,8 +1794,23 @@ initiate_connection:
 	}
 
 	// Start bidirectional copy
-	go io.Copy(serverOutbuf.transport, clientOutbuf.transport)
-	io.Copy(clientOutbuf.transport, serverOutbuf.transport)
+	go func() {
+		_, err := io.Copy(serverOutbuf.transport, clientOutbuf.transport)
+		if err != nil {
+			writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "client_to_server_copy", 1798)
+			if writeErr != nil {
+				return
+			}
+		}
+	}()
+	_, err = io.Copy(clientOutbuf.transport, serverOutbuf.transport)
+	if err != nil {
+		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "server_to_client_copy", 1806)
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		return nil, err
+	}
 
 	return sess, nil
 }
