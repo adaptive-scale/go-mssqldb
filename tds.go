@@ -1596,7 +1596,6 @@ initiate_connection:
 		}
 		return nil, err
 	}
-	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Total bytes written: %v", total))
 
 	// Read raw prelogin response bytes from server
 	err = serverOutbuf.readNextPacket()
@@ -1761,7 +1760,6 @@ initiate_connection:
 		}
 		return nil, err
 	}
-	logger.Log(ctx, msdsn.LogDebug, fmt.Sprintf("Client login fields: %v", clientLogin))
 
 	err = validateAndUpdateClientLogin(clientOutbuf, clientLogin, proxyDetails)
 	if err != nil {
