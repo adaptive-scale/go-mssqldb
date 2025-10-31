@@ -1702,6 +1702,18 @@ initiate_connection:
 
 	err = validateAndUpdateClientLogin(clientOutbuf, clientLogin, proxyDetails)
 	if err != nil {
+		err = writeError72(clientOutbuf, Error{
+			Number:     0,
+			State:      0,
+			Class:      0,
+			Message:    err.Error(),
+			ServerName: "",
+			ProcName:   "",
+			LineNo:     0,
+		})
+		if err != nil {
+			return nil, err
+		}
 		return nil, err
 	}
 
