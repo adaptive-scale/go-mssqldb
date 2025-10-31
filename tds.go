@@ -1588,7 +1588,7 @@ initiate_connection:
 	}
 
 	// Write the same bytes to the server
-	total, err := serverOutbuf.transport.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
+	_, err = serverOutbuf.transport.Write(clientOutbuf.rbuf[:clientOutbuf.rsize])
 	if err != nil {
 		writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "write_prelogin_request", 1587)
 		if writeErr != nil {
