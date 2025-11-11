@@ -412,7 +412,7 @@ type ProxyDetails struct {
 	ClientCert       tls.Certificate
 	FrontendPassword string
 	BackendPassword  string
-	collector        io.Writer
+	Collector        io.Writer
 }
 
 func OpenProxy(ctx context.Context, dsn string, logger ContextLogger, clientConn net.Conn, proxyDetails ProxyDetails) (*Conn, error) {
