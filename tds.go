@@ -1797,7 +1797,8 @@ initiate_connection:
 
 	// Start bidirectional copy
 	go func() {
-		_, err := io.Copy(serverOutbuf.transport, clientOutbuf.transport)
+		mw := io.MultiWriter(serverOutbuf.transport, proxyDetails.collector)
+		_, err := io.Copy(mw, clientOutbuf.transport)
 		if err != nil {
 			writeErr := writeSQLErrorSimple(clientOutbuf, err.Error(), "client_to_server_copy", 1798)
 			if writeErr != nil {
